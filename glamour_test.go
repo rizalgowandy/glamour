@@ -2,26 +2,27 @@ package glamour
 
 import (
 	"bytes"
-	"io/ioutil"
+	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
+
+	styles "github.com/charmbracelet/glamour/styles"
+	"github.com/charmbracelet/x/exp/golden"
 )
 
-const (
-	generate = false
-	markdown = "testdata/readme.markdown.in"
-	testFile = "testdata/readme.test"
-)
+const markdown = "testdata/readme.markdown.in"
 
 func TestTermRendererWriter(t *testing.T) {
 	r, err := NewTermRenderer(
-		WithStandardStyle("dark"),
+		WithStandardStyle(styles.DarkStyle),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	in, err := ioutil.ReadFile(markdown)
+	in, err := os.ReadFile(markdown)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,30 +36,12 @@ func TestTermRendererWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b, err := ioutil.ReadAll(r)
+	b, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// generate
-	if generate {
-		err := ioutil.WriteFile(testFile, b, 0644)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-
-	// verify
-	td, err := ioutil.ReadFile(testFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !bytes.Equal(td, b) {
-		t.Errorf("Rendered output doesn't match!\nExpected: `\n%s`\nGot: `\n%s`\n",
-			string(td), b)
-	}
+	golden.RequireEqual(t, b)
 }
 
 func TestTermRenderer(t *testing.T) {
@@ -69,7 +52,7 @@ func TestTermRenderer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	in, err := ioutil.ReadFile(markdown)
+	in, err := os.ReadFile(markdown)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,16 +62,7 @@ func TestTermRenderer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// verify
-	td, err := ioutil.ReadFile(testFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !bytes.Equal(td, []byte(b)) {
-		t.Errorf("Rendered output doesn't match!\nExpected: `\n%s`\nGot: `\n%s`\n",
-			string(td), b)
-	}
+	golden.RequireEqual(t, []byte(b))
 }
 
 func TestWithEmoji(t *testing.T) {
@@ -121,7 +95,7 @@ func TestWithPreservedNewLines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	in, err := ioutil.ReadFile("testdata/preserved_newline.in")
+	in, err := os.ReadFile("testdata/preserved_newline.in")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,16 +105,7 @@ func TestWithPreservedNewLines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// verify
-	td, err := ioutil.ReadFile("testdata/preserved_newline.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !bytes.Equal(td, []byte(b)) {
-		t.Errorf("Rendered output doesn't match!\nExpected: `\n%s`\nGot: `\n%s`\n",
-			string(td), b)
-	}
+	golden.RequireEqual(t, []byte(b))
 }
 
 func TestStyles(t *testing.T) {
@@ -152,7 +117,7 @@ func TestStyles(t *testing.T) {
 	}
 
 	_, err = NewTermRenderer(
-		WithStandardStyle("auto"),
+		WithStandardStyle(styles.AutoStyle),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -166,8 +131,48 @@ func TestStyles(t *testing.T) {
 	}
 }
 
+// TestCustomStyle checks the expected errors with custom styling. We need to
+// support built-in styles and custom style sheets.
+func TestCustomStyle(t *testing.T) {
+	md := "testdata/example.md"
+	tests := []struct {
+		name      string
+		stylePath string
+		err       error
+		expected  string
+	}{
+		{name: "style exists", stylePath: "testdata/custom.style", err: nil, expected: "testdata/custom.style"},
+		{name: "style doesn't exist", stylePath: "testdata/notfound.style", err: os.ErrNotExist, expected: styles.AutoStyle},
+		{name: "style is empty", stylePath: "", err: nil, expected: styles.AutoStyle},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GLAMOUR_STYLE", tc.stylePath)
+			g, err := NewTermRenderer(
+				WithEnvironmentConfig(),
+			)
+			if !errors.Is(err, tc.err) {
+				t.Fatal(err)
+			}
+			if !errors.Is(tc.err, os.ErrNotExist) {
+				w, err := NewTermRenderer(WithStylePath(tc.expected))
+				if err != nil {
+					t.Fatal(err)
+				}
+				text, _ := os.ReadFile(md)
+				want, err := w.RenderBytes(text)
+				got, err := g.RenderBytes(text)
+				if !bytes.Equal(want, got) {
+					t.Error("Wrong style used")
+				}
+			}
+		})
+	}
+}
+
 func TestRenderHelpers(t *testing.T) {
-	in, err := ioutil.ReadFile(markdown)
+	in, err := os.ReadFile(markdown)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,21 +182,12 @@ func TestRenderHelpers(t *testing.T) {
 		t.Error(err)
 	}
 
-	// verify
-	td, err := ioutil.ReadFile(testFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if b != string(td) {
-		t.Errorf("Rendered output doesn't match!\nExpected: `\n%s`\nGot: `\n%s`\n",
-			string(td), b)
-	}
+	golden.RequireEqual(t, []byte(b))
 }
 
 func TestCapitalization(t *testing.T) {
 	p := true
-	style := DarkStyleConfig
+	style := styles.DarkStyleConfig
 	style.H1.Upper = &p
 	style.H2.Title = &p
 	style.H3.Lower = &p
@@ -208,13 +204,17 @@ func TestCapitalization(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// expected outcome
-	td, err := ioutil.ReadFile("testdata/capitalization.test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	golden.RequireEqual(t, []byte(b))
+}
 
-	if string(td) != b {
-		t.Errorf("Rendered output doesn't match!\nExpected: `\n%s`\nGot: `\n%s`\n", td, b)
-	}
+func FuzzData(f *testing.F) {
+	f.Fuzz(func(t *testing.T, data []byte) {
+		func() int {
+			_, err := RenderBytes(data, styles.DarkStyle)
+			if err != nil {
+				return 0
+			}
+			return 1
+		}()
+	})
 }

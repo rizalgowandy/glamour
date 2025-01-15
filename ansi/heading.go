@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 
-	"github.com/muesli/reflow/indent"
 	"github.com/muesli/reflow/wordwrap"
 )
 
@@ -14,23 +13,32 @@ type HeadingElement struct {
 	First bool
 }
 
+const (
+	h1 = iota + 1
+	h2
+	h3
+	h4
+	h5
+	h6
+)
+
 func (e *HeadingElement) Render(w io.Writer, ctx RenderContext) error {
 	bs := ctx.blockStack
 	rules := ctx.options.Styles.Heading
 
 	switch e.Level {
-	case 1:
-		rules = cascadeStyles(true, rules, ctx.options.Styles.H1)
-	case 2:
-		rules = cascadeStyles(true, rules, ctx.options.Styles.H2)
-	case 3:
-		rules = cascadeStyles(true, rules, ctx.options.Styles.H3)
-	case 4:
-		rules = cascadeStyles(true, rules, ctx.options.Styles.H4)
-	case 5:
-		rules = cascadeStyles(true, rules, ctx.options.Styles.H5)
-	case 6:
-		rules = cascadeStyles(true, rules, ctx.options.Styles.H6)
+	case h1:
+		rules = cascadeStyles(rules, ctx.options.Styles.H1)
+	case h2:
+		rules = cascadeStyles(rules, ctx.options.Styles.H2)
+	case h3:
+		rules = cascadeStyles(rules, ctx.options.Styles.H3)
+	case h4:
+		rules = cascadeStyles(rules, ctx.options.Styles.H4)
+	case h5:
+		rules = cascadeStyles(rules, ctx.options.Styles.H5)
+	case h6:
+		rules = cascadeStyles(rules, ctx.options.Styles.H6)
 	}
 
 	if !e.First {
@@ -51,28 +59,16 @@ func (e *HeadingElement) Render(w io.Writer, ctx RenderContext) error {
 func (e *HeadingElement) Finish(w io.Writer, ctx RenderContext) error {
 	bs := ctx.blockStack
 	rules := bs.Current().Style
+	mw := NewMarginWriter(ctx, w, rules)
 
-	var indentation uint
-	var margin uint
-	if rules.Indent != nil {
-		indentation = *rules.Indent
-	}
-	if rules.Margin != nil {
-		margin = *rules.Margin
-	}
-
-	iw := indent.NewWriterPipe(w, indentation+margin, func(wr io.Writer) {
-		renderText(w, ctx.options.ColorProfile, bs.Parent().Style.StylePrimitive, " ")
-	})
-
-	flow := wordwrap.NewWriter(int(bs.Width(ctx) - indentation - margin*2))
+	flow := wordwrap.NewWriter(int(bs.Width(ctx)))
 	_, err := flow.Write(bs.Current().Block.Bytes())
 	if err != nil {
 		return err
 	}
 	flow.Close()
 
-	_, err = iw.Write(flow.Bytes())
+	_, err = mw.Write(flow.Bytes())
 	if err != nil {
 		return err
 	}
